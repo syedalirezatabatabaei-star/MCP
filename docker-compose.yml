@@ -1,10 +1,10 @@
 services:
   torob-mcp:
     build:
-      context: ..
-      dockerfile: torob/Dockerfile.mcp
+      context: .
+      dockerfile: Dockerfile.mcp
     environment:
-      TOROB_AUTH_TOKEN: ${TOROB_MCP_TOKEN:?Set TOROB_MCP_TOKEN in torob/.env}
+      TOROB_AUTH_TOKEN: ${TOROB_MCP_TOKEN:?Set TOROB_MCP_TOKEN in .env}
       TOROB_ALLOWED_HOSTS: torob-mcp,localhost,127.0.0.1
       TOROB_LOG_LEVEL: info
       TOROB_TIMEOUT_MS: 15000
@@ -19,6 +19,8 @@ services:
       TOROB_MAX_SUBREQUESTS: 12
     expose:
       - "3000"
+    networks:
+      - shared_network
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -35,7 +37,7 @@ services:
       PORT: 3001
       HOST: 0.0.0.0
       TOROB_MCP_URL: http://torob-mcp:3000
-      TOROB_MCP_TOKEN: ${TOROB_MCP_TOKEN:?Set TOROB_MCP_TOKEN in torob/.env}
+      TOROB_MCP_TOKEN: ${TOROB_MCP_TOKEN:?Set TOROB_MCP_TOKEN in .env}
       MAX_PRODUCTS: ${TOROB_MAX_PRODUCTS:-25}
       MCP_CALL_GAP_MS: 550
     depends_on:
@@ -43,4 +45,11 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:${BRIDGE_PORT:-3001}:3001"
+    networks:
+      - shared_network
     restart: unless-stopped
+
+networks:
+  shared_network:
+    external: true
+    name: shared_network
