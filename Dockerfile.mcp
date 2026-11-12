@@ -9,7 +9,7 @@ RUN git init \
  && git fetch --depth=1 origin "${TOROB_MCP_COMMIT}" \
  && git checkout --detach FETCH_HEAD
 
-COPY torob/patches/apply-safe-policy.mjs /tmp/apply-safe-policy.mjs
+COPY patches/apply-safe-policy.mjs /tmp/apply-safe-policy.mjs
 RUN node /tmp/apply-safe-policy.mjs /opt/torob-upstream/packages/core/src/torob/client.ts
 
 RUN corepack enable \
