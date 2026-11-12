@@ -1,0 +1,46 @@
+services:
+  torob-mcp:
+    build:
+      context: ..
+      dockerfile: torob/Dockerfile.mcp
+    environment:
+      TOROB_AUTH_TOKEN: ${TOROB_MCP_TOKEN:?Set TOROB_MCP_TOKEN in torob/.env}
+      TOROB_ALLOWED_HOSTS: torob-mcp,localhost,127.0.0.1
+      TOROB_LOG_LEVEL: info
+      TOROB_TIMEOUT_MS: 15000
+      TOROB_CONCURRENCY: 1
+      TOROB_RATE_PER_SEC: 2
+      TOROB_CACHE_MAX_BYTES: 33554432
+      TOROB_TTL_SEARCH_S: 300
+      TOROB_TTL_PRODUCT_S: 900
+      TOROB_TTL_PRICE_CHART_S: 21600
+      TOROB_TTL_SHOP_S: 21600
+      TOROB_TTL_CITY_S: 86400
+      TOROB_MAX_SUBREQUESTS: 12
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  torob-bridge:
+    build:
+      context: ./bridge
+      dockerfile: Dockerfile
+    environment:
+      PORT: 3001
+      HOST: 0.0.0.0
+      TOROB_MCP_URL: http://torob-mcp:3000
+      TOROB_MCP_TOKEN: ${TOROB_MCP_TOKEN:?Set TOROB_MCP_TOKEN in torob/.env}
+      MAX_PRODUCTS: ${TOROB_MAX_PRODUCTS:-25}
+      MCP_CALL_GAP_MS: 550
+    depends_on:
+      torob-mcp:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${BRIDGE_PORT:-3001}:3001"
+    restart: unless-stopped
