@@ -1,0 +1,24 @@
+FROM node:22-alpine
+
+RUN apk add --no-cache git
+WORKDIR /opt/torob-upstream
+
+ARG TOROB_MCP_COMMIT=6951f4261249ee4a2dde6fef893e4dcacb5673e4
+RUN git init \
+ && git remote add origin https://github.com/siamak/torob-mcp.git \
+ && git fetch --depth=1 origin "${TOROB_MCP_COMMIT}" \
+ && git checkout --detach FETCH_HEAD
+
+COPY torob/patches/apply-safe-policy.mjs /tmp/apply-safe-policy.mjs
+RUN node /tmp/apply-safe-policy.mjs /opt/torob-upstream/packages/core/src/torob/client.ts
+
+RUN corepack enable \
+ && corepack prepare pnpm@10.19.0 --activate \
+ && pnpm install --frozen-lockfile \
+ && pnpm --filter torob-mcp build
+
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+EXPOSE 3000
+
+CMD ["node", "apps/node/dist/bin.mjs", "--http", "--host", "0.0.0.0"]
