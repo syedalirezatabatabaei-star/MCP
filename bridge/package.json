@@ -1,0 +1,11 @@
+{
+  "name": "torob-n8n-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node server.mjs" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.1"
+  },
+  "engines": { "node": ">=22" }
+}
