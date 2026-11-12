@@ -26,7 +26,7 @@ const policy = `  // Unified integration policy: challenge and access-limit resp
 
   if (status === 403 || status === 490) {
     return new TorobError('Blocked', {
-      hint: `Torob returned HTTP ${status} - requests have stopped; human review is required`,
+      hint: 'Torob returned HTTP ' + status + ' - requests have stopped; human review is required',
       status,
       endpoint,
       detail: 'terminal access restriction',
