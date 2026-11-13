@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
@@ -16,6 +16,25 @@ if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) throw new Error('Invali
 
 let busy = false;
 let lastCallAt = 0;
+const reviews = new Map();
+const REVIEW_TTL_MS = 30 * 60 * 1000;
+
+function createReview(input, error) {
+  const id = randomUUID();
+  const review = { id, query: String(input?.query ?? '').trim(), max_products: Number(input?.max_products ?? 10), include_variants: input?.include_variants !== false, state: 'awaiting_manual_review', created_at: new Date().toISOString(), error: error.message };
+  reviews.set(id, review);
+  return review;
+}
+
+function getReview(id) {
+  const review = reviews.get(id);
+  if (!review) return null;
+  if (Date.now() - Date.parse(review.created_at) > REVIEW_TTL_MS) {
+    reviews.delete(id);
+    return null;
+  }
+  return review;
+}
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const pace = async () => {
@@ -284,6 +303,22 @@ const server = createServer(async (req, res) => {
     send(res, 401, { ok: false, error: 'unauthorized' });
     return;
   }
+  const approveMatch = /^\/api\/reviews\/([0-9a-f-]+)\/approve$/i.exec(url.pathname);
+  if (req.method === 'POST' && approveMatch) {
+    const review = getReview(approveMatch[1]);
+    if (!review) {
+      send(res, 404, { ok: false, code: 'REVIEW_NOT_FOUND', error: 'Review does not exist or has expired' });
+      return;
+    }
+    if (review.state === 'approved') {
+      send(res, 200, { ok: true, state: 'approved', review_id: review.id, message: 'One manual retry is authorized. Submit /api/search with this review_id.' });
+      return;
+    }
+    review.state = 'approved';
+    review.approved_at = new Date().toISOString();
+    send(res, 200, { ok: true, state: 'approved', review_id: review.id, message: 'One manual retry is authorized. Submit /api/search with this review_id.' });
+    return;
+  }
   if (req.method !== 'POST' || url.pathname !== '/api/search') {
     send(res, 404, { ok: false, error: 'not found' });
     return;
@@ -293,17 +328,46 @@ const server = createServer(async (req, res) => {
     return;
   }
   busy = true;
+  let input = {};
   try {
-    const input = await readJson(req);
+    input = await readJson(req);
+    if (input.review_id) {
+      const review = getReview(String(input.review_id));
+      if (!review || review.state !== 'approved') {
+        send(res, 409, { ok: false, code: 'MANUAL_APPROVAL_REQUIRED', error: 'A valid manually approved review_id is required for this retry', human_review_required: true, retry_automatically: false });
+        return;
+      }
+      if (String(input.query ?? '').trim() !== review.query) {
+        send(res, 400, { ok: false, code: 'REVIEW_QUERY_MISMATCH', error: 'The query must match the query held for manual review' });
+        return;
+      }
+      input.max_products = review.max_products;
+      input.include_variants = review.include_variants;
+      reviews.delete(review.id);
+    }
     const result = await runExport(input);
     send(res, 200, result);
   } catch (error) {
     const status = error.status ?? statusFor(error);
+    const blocked = error.kind === 'Blocked' || status === 423;
+    const review = blocked ? createReview(input, error) : null;
     send(res, status, {
       ok: false,
       code: error.kind ?? 'REQUEST_FAILED',
       error: error.message ?? 'Torob export failed',
-      human_review_required: error.kind === 'Blocked' || status === 423,
+      human_review_required: blocked,
+      ...(review ? {
+        review_id: review.id,
+        review_state: review.state,
+        review_expires_in_seconds: Math.floor(REVIEW_TTL_MS / 1000),
+        manual_review: {
+          instruction: 'Open Torob manually in a normal browser and verify that access is permitted and no challenge is being presented. Do not automate or bypass the challenge.',
+          approval_endpoint: `POST /api/reviews/${review.id}/approve`,
+          retry_endpoint: 'POST /api/search',
+          retry_body: { query: review.query, max_products: review.max_products, include_variants: review.include_variants, review_id: review.id },
+          note: 'Approval permits exactly one new request; it does not bypass access controls. If Torob still blocks access, the process stops and a new manual review is required.'
+        }
+      } : {}),
       retry_automatically: false
     });
   } finally {
