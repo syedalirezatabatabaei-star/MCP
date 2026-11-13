@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { diagnoseTorobBlock } from './ai-diagnose.mjs';
 
 const HOST = process.env.HOST ?? '0.0.0.0';
 const PORT = Number(process.env.PORT ?? 3001);
@@ -284,6 +285,16 @@ const server = createServer(async (req, res) => {
     send(res, 401, { ok: false, error: 'unauthorized' });
     return;
   }
+  if (req.method === 'POST' && url.pathname === '/api/diagnose') {
+    try {
+      const input = await readJson(req);
+      const result = await diagnoseTorobBlock(input);
+      send(res, 200, result);
+    } catch (error) {
+      send(res, 502, { enabled: true, status: 'diagnostic_error', message: error.message });
+    }
+    return;
+  }
   if (req.method !== 'POST' || url.pathname !== '/api/search') {
     send(res, 404, { ok: false, error: 'not found' });
     return;
@@ -299,13 +310,18 @@ const server = createServer(async (req, res) => {
     send(res, 200, result);
   } catch (error) {
     const status = error.status ?? statusFor(error);
-    send(res, status, {
+    const blocked = error.kind === 'Blocked' || status === 423;
+    const response = {
       ok: false,
       code: error.kind ?? 'REQUEST_FAILED',
       error: error.message ?? 'Torob export failed',
-      human_review_required: error.kind === 'Blocked' || status === 423,
+      human_review_required: blocked,
       retry_automatically: false
-    });
+    };
+    if (blocked) {
+      response.ai_diagnosis = await diagnoseTorobBlock({ code: response.code, error: response.error });
+    }
+    send(res, status, response);
   } finally {
     busy = false;
   }
