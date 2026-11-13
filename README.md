@@ -47,6 +47,29 @@ The bridge is published on loopback only. Do not expose it directly to the publi
 
 Send `Authorization: Bearer <TOROB_MCP_TOKEN>`. The response contains `rows`, one row per product-variant/seller offer, and `summary`. The bridge uses a single MCP session per export and follows local cursors until all sellers are collected.
 
+### Manual review and one-time resume
+
+When Torob returns a challenge or access restriction, the bridge stops and returns HTTP `423` with `human_review_required: true`, a short-lived `review_id` (30 minutes), and a manual review instruction. No automatic retry is performed.
+
+1. Open Torob manually in a normal browser and check whether access is permitted. Do not use automation to solve or bypass a challenge.
+2. If the site is accessible and the operator has verified that continuing is permitted, approve the pending review:
+
+```bash
+curl -X POST "http://127.0.0.1:3001/api/reviews/REVIEW_ID/approve" \\
+  -H "Authorization: Bearer $TOROB_MCP_TOKEN"
+```
+
+3. Make exactly one new request using the same query and the returned `review_id`:
+
+```bash
+curl -X POST http://127.0.0.1:3001/api/search \\
+  -H "Authorization: Bearer $TOROB_MCP_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{"query":"iphone 16","max_products":10,"include_variants":true,"review_id":"REVIEW_ID"}'
+```
+
+Approval is an explicit operator acknowledgement, not a CAPTCHA bypass. If Torob still blocks the request, it stops again and requires a new review. Pending approvals are held in memory and are lost if the bridge restarts.
+
 ## n8n
 
 Import `../workflows/torob-unified-failover.json`. Configure these environment variables for the n8n process:
